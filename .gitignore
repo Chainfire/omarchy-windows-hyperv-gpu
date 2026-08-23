@@ -1,0 +1,7 @@
+# Local QEMU install (~656 MB): the full Windows QEMU tree, including the
+# patched qemu-system binaries produced by patch/whpx_nested_patch.exe.
+# Never tracked -- ship it as a GitHub Release asset if you need to.
+bin/
+
+# JetBrains IDE project files
+.idea/

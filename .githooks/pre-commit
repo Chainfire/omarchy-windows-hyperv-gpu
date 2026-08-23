@@ -1,0 +1,32 @@
+#!/bin/bash
+# Reject any staged text file containing bare LF line endings.
+# See .gitattributes: this repo stores CRLF verbatim so that the GitHub
+# "Download ZIP" extracts .bat files that Windows can actually run.
+set -u
+
+tmp=$(mktemp) || exit 1
+trap 'rm -f "$tmp"' EXIT
+
+bad=()
+while IFS= read -r -d '' f; do
+	git cat-file blob ":$f" > "$tmp" 2>/dev/null || continue
+	grep -Iq . "$tmp" || continue                       # binary: leave alone
+	[[ $(head -c 2 "$tmp") == '#!' ]] && continue       # shebang: must stay LF
+	perl -0777 -ne 'exit(/(?<!\r)\n/ ? 1 : 0)' "$tmp" && continue
+	bad+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM -z)
+
+(( ${#bad[@]} == 0 )) && exit 0
+
+{
+	echo "pre-commit: staged files have LF endings, but this repo requires CRLF:"
+	printf '  %s\n' "${bad[@]}"
+	echo
+	echo "Fix and re-stage:"
+	for f in "${bad[@]}"; do
+		printf '  sed -i %s %q && git add %q\n' "'s/\$/\\r/'" "$f" "$f"
+	done
+	echo
+	echo "Bypass once with: git commit --no-verify"
+} >&2
+exit 1

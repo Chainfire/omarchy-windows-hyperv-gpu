@@ -1,0 +1,6 @@
+# Store files byte-for-byte: git performs NO eol normalization in this repo.
+# Combined with CRLF on disk, this means CRLF is what lands in the objects.
+* -text
+
+# Keep binaries out of textual diffs/merges
+*.exe -diff -merge

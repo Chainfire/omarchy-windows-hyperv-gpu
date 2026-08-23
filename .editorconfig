@@ -1,0 +1,17 @@
+# Travels with the repo: keeps editors from silently rewriting CRLF to LF.
+# This matters because .gitattributes uses `* -text`, so git will NOT fix
+# line endings for you -- whatever you save is what ships in the GitHub ZIP.
+root = true
+
+[*]
+end_of_line = crlf
+insert_final_newline = true
+charset = utf-8
+
+# Shell scripts must be LF -- a CRLF shebang is unrunnable on Linux.
+[.githooks/*]
+end_of_line = lf
+
+[*.{exe,bin,img,qcow2}]
+end_of_line = unset
+insert_final_newline = unset
