@@ -1,0 +1,12 @@
+#!/bin/bash
+# Clear the pinned mode from monitors.lua at session exit.
+#
+# Pinning exists so a config reload does not bounce the display; it must never
+# survive a reboot. The QEMU window always starts small, so a stale pin makes
+# Hyprland modeset a resolution that does not match the window -- which wedges
+# the display black, and correcting the mode afterwards does not recover it.
+LUA="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/monitors.lua"
+[[ -w $LUA ]] || exit 0
+grep -qE '^hl\.monitor\(\{ output = "", mode = "[0-9]+x[0-9]+"' "$LUA" || exit 0
+sed -i -E 's|^(hl\.monitor\(\{ output = "", mode = ")[^"]*(")|\1preferred\2|' "$LUA"
+logger -t qemu-display-autoresize -p user.info -- "monitors.lua: cleared pin -> preferred (session exit)"

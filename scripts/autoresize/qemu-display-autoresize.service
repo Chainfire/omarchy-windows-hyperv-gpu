@@ -1,0 +1,24 @@
+[Unit]
+Description=Follow QEMU window resizes (virtio-gpu EDID changes Hyprland ignores)
+Documentation=file:%h/.local/bin/qemu-display-autoresize
+# Nothing to do on bare metal: the script no-ops there anyway, but this keeps the
+# unit from even starting if this config is ever carried to a physical machine.
+ConditionVirtualization=vm
+# hyprctl hard-fails without HYPRLAND_INSTANCE_SIGNATURE. uwsm lists that var in
+# UWSM_WAIT_VARNAMES, so it is in the user manager environment before
+# graphical-session.target is reached -- ordering after the target is what makes
+# the environment safe to rely on.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+Slice=app-graphical.slice
+ExecStart=%h/.local/bin/qemu-display-autoresize
+# A pinned mode must never survive into the next boot.
+ExecStop=%h/.local/bin/qemu-display-autoresize-reset
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

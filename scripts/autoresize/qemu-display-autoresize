@@ -1,0 +1,116 @@
+#!/bin/bash
+# Follow QEMU window resizes.
+#
+# aquamarine parses a connector's EDID once, in SDRMConnector::init(), and only
+# ever calls it for a connector it has not seen before. A connector that stays
+# "connected" across a hotplug takes the fast path in scanConnectors() and keeps
+# its boot-time mode list forever. That assumption holds for physical monitors
+# and breaks for virtio-gpu, where resizing the host window rewrites the EDID
+# without the connector ever disconnecting: the kernel's mode list updates,
+# Hyprland's does not, and mode = "preferred" can only ever resolve to the mode
+# that was current at login.
+#
+# So: watch for the DRM hotplug the kernel does emit, read the new preferred
+# mode out of sysfs, and hand it to Hyprland explicitly.
+
+set -uo pipefail
+
+DEBOUNCE=${QEMU_AUTORESIZE_DEBOUNCE:-0.4}
+MONITORS_LUA="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/monitors.lua"
+
+log() { logger -t qemu-display-autoresize -p user.info -- "$*"; }
+
+hypr_socket() {
+  local sig=${HYPRLAND_INSTANCE_SIGNATURE:-}
+  local dir="${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr"
+  if [[ -z $sig ]]; then
+    sig=$(ls -t "$dir" 2>/dev/null | head -1)
+  fi
+  [[ -n $sig ]] && printf '%s/%s/.socket2.sock' "$dir" "$sig"
+}
+
+# Only virtual GPUs need this. On real hardware the cached mode list is already
+# correct, and forcing the preferred mode would trample a deliberate lower
+# resolution set in monitors.lua.
+is_virtual() {
+  local drv
+  drv=$(basename "$(readlink -f "/sys/class/drm/$1/device/driver" 2>/dev/null)" 2>/dev/null)
+  [[ $drv == virtio* ]]
+}
+
+# Prefer the scale the user configured over the one currently applied, so a
+# scale that had to be dropped to 1 for an awkward window size comes back when
+# the window is sized somewhere it fits again.
+wanted_scale() {
+  local configured
+  configured=$(sed -nE 's/^local omarchy_monitor_scale = ([0-9.]+).*/\1/p' \
+    "$MONITORS_LUA" 2>/dev/null | head -1)
+  printf '%s' "${configured:-$1}"
+}
+
+# Persist the mode into monitors.lua. Without this every reload re-applies
+# mode = "preferred", which resolves against aquamarine's stale list and snaps
+# the display back to its login resolution -- so switching a theme would visibly
+# bounce the screen and wait for us to undo it. Writing the real mode makes the
+# reload correct on its own; we stay as the thing that keeps it up to date.
+# Only the generic catch-all line is touched, and only the mode field, so the
+# scale stays owned by omarchy-hyprland-monitor-scaling.
+persist_mode() {
+  local mode=$1 lua="$MONITORS_LUA"
+  [[ -w $lua ]] || return 0
+  grep -qE '^hl\.monitor\(\{ output = "", mode = "[^"]*", position = "auto", scale = ' "$lua" || return 0
+  grep -qE '^hl\.monitor\(\{ output = "", mode = "'"$mode"'"' "$lua" && return 0
+  sed -i -E "s|^(hl\.monitor\(\{ output = \"\", mode = \")[^\"]*(\")|\\1${mode}\\2|" "$lua"
+  log "monitors.lua: pinned mode -> $mode"
+}
+
+sync_once() {
+  local conn base card name mode cur scale new_scale info
+
+  for conn in /sys/class/drm/card*-*/; do
+    [[ -r $conn/status && $(<"$conn/status") == connected ]] || continue
+
+    base=$(basename "$conn"); card=${base%%-*}; name=${base#*-}
+    is_virtual "$card" || continue
+
+    mode=$(head -1 "$conn/modes" 2>/dev/null)
+    [[ $mode =~ ^[0-9]+x[0-9]+$ ]] || continue
+
+    info=$(hyprctl monitors -j 2>/dev/null | jq -r --arg n "$name" \
+      '.[] | select(.name == $n) | "\(.width)x\(.height) \(.scale)"') || continue
+    [[ -n $info ]] || continue
+
+    cur=${info% *}; scale=${info#* }
+
+    # Unconditional: the mode can already be right while monitors.lua still says
+    # "preferred", which is the state every reload would regress from.
+    persist_mode "$mode"
+    [[ $cur == "$mode" ]] && continue
+
+    new_scale=$(wanted_scale "$scale")
+
+    log "$name: $cur -> $mode (scale $scale -> $new_scale)"
+    hyprctl eval "hl.monitor({ output = \"$name\", mode = \"$mode\", position = \"auto\", scale = $new_scale })" >/dev/null
+  done
+}
+
+# The window may have been resized before this started, or before login.
+sync_once
+
+# Two triggers. The DRM uevent is the resize itself -- aquamarine receives the
+# same event and discards it. configreloaded is the repair: any reload re-applies
+# mode = "preferred", which resolves against the stale list and snaps the display
+# back to its login resolution, with no uevent to announce it.
+SOCKET=$(hypr_socket)
+{
+  stdbuf -oL udevadm monitor --udev --subsystem-match=drm 2>/dev/null |
+    grep --line-buffered -E 'change.*\(drm\)' &
+  [[ -n $SOCKET ]] && socat -U - "UNIX-CONNECT:$SOCKET" 2>/dev/null |
+    grep --line-buffered '^configreloaded' &
+  wait
+} | while read -r _; do
+  # Dragging a window edge emits a burst; wait for the stream to go quiet, which
+  # also gives the kernel a moment to publish the rebuilt mode list.
+  while read -r -t "$DEBOUNCE" _; do :; done
+  sync_once
+done

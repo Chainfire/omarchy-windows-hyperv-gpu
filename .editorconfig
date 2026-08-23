@@ -12,6 +12,10 @@ charset = utf-8
 [.githooks/*]
 end_of_line = lf
 
+# Guest-side Linux scripts and systemd units: LF, enforced by .githooks/pre-commit.
+[scripts/**]
+end_of_line = lf
+
 [*.{exe,bin,img,qcow2}]
 end_of_line = unset
 insert_final_newline = unset

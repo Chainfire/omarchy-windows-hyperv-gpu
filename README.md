@@ -64,6 +64,19 @@ All of this takes about 5 minutes start to finish.
 - Chromium (and anything Chromium based) is known to have some issues. Recommend setting Firefox as your browser in Omarchy, or forcing software rendering for Chromium things; if you must run Chromium, be sure to disable hardware video decoding in `chrome://flags`.
 - Virtualization inside Omarchy probably does not work (QEMU and friends).
 
+## Extras
+
+### QEMU display auto-resize
+
+See [scripts/autoresize/](scripts/autoresize/)
+
+`git clone` this repo inside your installation, and run the installer. Now the resolution 
+of Omarchy follows the size of the QEMU window.
+
+Notes: 
+- Ctrl+Alt+F full-screens QEMU
+- Not resizing the window at all until the GUI is fully loaded is advised
+
 ## Disclaimer
 
 This works for me on my AMD 9950x3D + Nvidia 4090, Windows 11 Pro 21H2. In `Windows Security -> Device Security -> Core Isolation`, I have `Memory Integrity` turned **OFF**. Claude feels that is relevant information, having it **ON** might stop all this from working - or it might not!
